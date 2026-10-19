@@ -36,3 +36,68 @@ numeric = ["age", "temperature", "heartrate", "resprate", "o2sat", "sbp", "dbp",
 # Columns describing what occurs after triage -> never used as features
 leakage = ["hadm_id", "outtime", "disposition", "icu_intime", "hours_to_icu",
            "icu_any", "icu_24h", "first_vitals_mins"]
+
+# Features
+def build_features(cohort:pd.DataFrame) -> pd.DataFrame:
+    """Create feature matrix from triage time variables
+    
+    Encoding categories as 0 and 1 does not learn from data,
+    so can be completed before train and test split"""
+
+    X = pd.DataFrame(index = cohort.index)
+
+    # Continuous measurements (still containing missing values)
+    X[numeric] = cohort[numeric]
+
+    # Binary flags
+    X["male"] = (cohort["gender"] == "M").astype(int)
+    X["triage_bypassed"] = cohort["triage_bypassed"].astype(int)   # whole triage form blank
+    X["pain_unable"] = cohort["pain_unable"].astype(int)           # pain could not be assessed
+    
+    # ESI acuity as categories and Missing acuity is informative (bypassed triage),
+    # so it is its own category
+    # ESI 3-5 are combined because ESI 4-5 are too rare to estimate separately
+        
+    esi = cohort["acuity"].map({1: "1", 2: "2", 3: "3plus", 4: "3plus", 5: "3plus"}).fillna("missing")
+    X = X.join(pd.get_dummies(esi, prefix = "esi", dtype = int))
+    
+    # Arrival mode as categories (missing treated as "unknown")
+    arrival = (cohort["arrival_transport"].fillna("UNKNOWN")
+                .str.lower().str.replace(" ", "_"))
+    X = X.join(pd.get_dummies(arrival, prefix="arrival", dtype = int))
+
+    return X
+
+# Train/test split by patient
+def split_by_patient(X, y, groups, test_folds=3, n_folds=10):
+    """Return a True/False mask marking the test set (about 30% of stays).
+ 
+    StratifiedGroupKFold divides patients into 10 folds while keeping the ICU
+    rate similar in each fold; 3 folds become the test set. All stays of a
+    patient fall in the same fold, so no patient is in both sets.
+    """
+
+    sgkf = StratifiedGroupKFold(n_splits = n_folds, shuffle = True, random_state = random_state)
+    fold = np.empty(len(y), dtype = int)
+    for k, (_, idx) in enumerate(sgkf.split(X, y, groups)):
+        fold[idx] = k
+    return fold < test_folds
+
+# Pre-processor (fitted later on training data only)
+def make_preprocessor() -> ColumnTransformer:
+    """Fill missing numeric values with training median and standardise.
+ 
+    Binary and category columns pass through unchanged. Used inside model
+    pipelines in models.py, so it is re-fitted within every cross-validation fold.
+    """
+
+    numeric_steps = Pipeline([
+        ("impute", SimpleImputer(strategy = "median")),
+        ("scale", StandardScaler()),
+    ])
+    return ColumnTransformer(
+        [("numeric", numeric_steps, numeric)],
+        remainder = "passthrough",              # keep flags and categories as is
+        verbose_feature_names_out = False,
+    )
+
