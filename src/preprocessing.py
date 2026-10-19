@@ -101,3 +101,40 @@ def make_preprocessor() -> ColumnTransformer:
         verbose_feature_names_out = False,
     )
 
+# Run
+def main():
+    cohort = pd.read_pickle(cohort_path).reset_index(drop=True)
+    assert cohort["stay_id"].is_unique, "duplicate ED stays in cohort"
+ 
+    X = build_features(cohort)
+    y = cohort[outcome].astype(int)
+    groups = cohort["subject_id"]
+ 
+    # Safety check: no post-triage information among the features
+    leaked = set(X.columns) & set(leakage)
+    assert not leaked, f"leakage columns in features: {leaked}"
+ 
+    is_test = split_by_patient(X, y, groups)
+    train = {"X": X[~is_test], "y": y[~is_test], "groups": groups[~is_test]}
+    test = {"X": X[is_test], "y": y[is_test], "groups": groups[is_test]}
+ 
+    # Checks: no patient in both sets, similar ICU rates
+    overlap = set(train["groups"]) & set(test["groups"])
+    assert not overlap, f"{len(overlap)} patients appear in both sets"
+ 
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pd.to_pickle(train, out_dir / "train.pkl")
+    pd.to_pickle(test, out_dir / "test.pkl")
+ 
+    print(f"Features ({X.shape[1]}): {list(X.columns)}\n")
+    print(f"{'':<8}{'stays':>7}{'patients':>10}{'ICU rate':>10}{'bypassed':>10}")
+    for name, part in [("train", train), ("test", test)]:
+        print(f"{name:<8}{len(part['y']):>7}{part['groups'].nunique():>10}"
+              f"{part['y'].mean():>10.1%}{part['X']['triage_bypassed'].mean():>10.1%}")
+    print("\nPatients in both sets:", len(overlap))
+    print("Saved to", out_dir)
+ 
+ 
+if __name__ == "__main__":
+    main()
+
