@@ -221,3 +221,5 @@ __marimo__/
 data/
 *.duckdb
 .DS_Store
+*.csv.gz
+notebooks/*.html
