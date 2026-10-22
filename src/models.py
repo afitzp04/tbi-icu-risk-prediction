@@ -159,7 +159,7 @@ def main():
     summary = pd.DataFrame(rows)
     summary.insert(0, "feature_set", fs)
     out_csv = results_dir / f"cv_results_{fs}.csv" # file per feature set to avoid writing over previous sets
-    summary.to_csv(results_dir / "out_csv", index = False)
+    summary.to_csv(results_dir / out_csv, index = False)
 
     print("Cross-Validation summary (training set only and ESI baseline AUROC = 0.697):")
     print(summary[["model", "auroc", "auroc_sd", "recall", "precision", "f1", "brier"]]

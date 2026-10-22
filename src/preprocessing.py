@@ -29,8 +29,9 @@ out_dir = root / "data" / "processed"
 
 outcome = "icu_24h"
 
-# Secondary feature set for chief complaints
-feature_set = "B" # A is baseline, B is baseline + chief complaint flags
+# Secondary feature sets
+# A = baseline, B = A + chief complaint flags, C = B + derived vitals
+feature_set = ("B")
 
 # Chief complaint flags are yes/no when free-text complaint matches pattern
 # Groups chosen for clinical reasons and checked only on training set
@@ -83,11 +84,23 @@ def build_features(cohort:pd.DataFrame) -> pd.DataFrame:
                 .str.lower().str.replace(" ", "_"))
     X = X.join(pd.get_dummies(arrival, prefix="arrival", dtype = int))
 
+    # Feature set definitions
     # Feature set B - chief complaints
-    if feature_set == "B":
+    if feature_set in ("B", "C"):
         complaint = cohort["chiefcomplaint"].fillna("").str.lower()
         for name, pattern in chief_complaint_flags.items():
             X[name] = complaint.str.contains(pattern, regex = True).astype(int)
+
+    # Feature set C - vitals
+    # Researched standard clinical definitions for vital sign thresholds
+    # Missing vital gives zero, but already accounted for by "triage_bypassed"
+    if feature_set == "C":
+        X["shock_index"] = cohort["heartrate"] / cohort["sbp"]          # > 0.9 -> shock
+        X["hypoxia"] = (cohort["o2sat"] < 94).astype(int)               # low oxygen 
+        X["hypotension"] = (cohort["sbp"] < 90).astype(int)             # low blood pressure
+        X["hypertension"] = (cohort["sbp"] > 160).astype(int)           # raised BP (possible Cushing response)
+        X["tachycardia"] = (cohort["heartrate"] > 100).astype(int)      # fast heart rate
+        X["age_65plus"] = (cohort["age"] >= 65).astype(int)             # older patients at higher risk
     
     return X
 
@@ -106,6 +119,14 @@ def split_by_patient(X, y, groups, test_folds=3, n_folds=10):
         fold[idx] = k
     return fold < test_folds
 
+# Shock index
+def numeric_columns(X):
+    """Continuous columns present in X (shock_index will only exist for feature set C).
+    
+    Columns chosen from data mean that the pre-processor will match faeture set that has been saved,
+    regardless of what feature_set is now set to"""
+    return [c for c in numeric + ["shock_index"] if c in X.columns]
+
 # Pre-processor (fitted later on training data only)
 def make_preprocessor() -> ColumnTransformer:
     """Fill missing numeric values with training median and standardise.
@@ -119,7 +140,7 @@ def make_preprocessor() -> ColumnTransformer:
         ("scale", StandardScaler()),
     ])
     return ColumnTransformer(
-        [("numeric", numeric_steps, numeric)],
+        [("numeric", numeric_steps, numeric_columns)],
         remainder = "passthrough",              # keep flags and categories as is
         verbose_feature_names_out = False,
     )
@@ -157,10 +178,15 @@ def main():
     print("\nPatients in both sets:", len(overlap))
     print("Saved to", out_dir)
 
-    if feature_set == "B":
+    if feature_set in ("B", "C"):
         Xtr, ytr = train["X"], train["y"]
+        flags = list(chief_complaint_flags)
+
+        if feature_set == "C":
+            flags += ["hypoxia", "hypotension", "hypertension", "tachycardia", "age_65plus"]
+    
         print(f"{'flag':<20}{'stays':>7}{'ICU rate':>10}")
-        for name in chief_complaint_flags:
+        for name in flags:
             on = Xtr[name] == 1
             print(f"{name:<20}{on.sum():>7}{ytr[on].mean():>10.1%}")
         print()
