@@ -217,9 +217,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-#Make specific to this project
+# Make specific to this project
 data/
 *.duckdb
 .DS_Store
 *.csv.gz
 notebooks/*.html
+
+# Ignore pycache
+src/__pycache__/

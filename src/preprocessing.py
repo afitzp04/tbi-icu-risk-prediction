@@ -28,6 +28,23 @@ cohort_path = root / "data" / "interim" / "cohort.pkl"
 out_dir = root / "data" / "processed"
 
 outcome = "icu_24h"
+
+# Secondary feature set for chief complaints
+feature_set = "B" # A is baseline, B is baseline + chief complaint flags
+
+# Chief complaint flags are yes/no when free-text complaint matches pattern
+# Groups chosen for clinical reasons and checked only on training set
+# \b = word boundary so that "ich" will not match in "which"
+
+chief_complaint_flags = {
+    "cc_ich":            r"\bich\b|head bleed|intracerebral|intraparenchymal",  # brain tissue bleed
+    "cc_sdh_sah":        r"\bsdh\b|\bsah\b|subdural|subarachnoid",              # bleed around brain
+    "cc_transfer":       r"transfer",                                           # from another hospital
+    "cc_impact":         r"\bmvc\b|\bmva\b|ped struck|pedestrian|\bmca\b|motorcycle|bicycl|\bbike", # accident
+    "cc_altered_mental": r"altered mental|\bams\b|unresponsive|seizure|confus|letharg",
+    "cc_fall":           r"fall",
+}
+
 random_state = 42 # fixed seed for identical splits every run
 
 # Continuous triage measurements: missing values will be filled and scaled
@@ -66,6 +83,12 @@ def build_features(cohort:pd.DataFrame) -> pd.DataFrame:
                 .str.lower().str.replace(" ", "_"))
     X = X.join(pd.get_dummies(arrival, prefix="arrival", dtype = int))
 
+    # Feature set B - chief complaints
+    if feature_set == "B":
+        complaint = cohort["chiefcomplaint"].fillna("").str.lower()
+        for name, pattern in chief_complaint_flags.items():
+            X[name] = complaint.str.contains(pattern, regex = True).astype(int)
+    
     return X
 
 # Train/test split by patient
@@ -115,9 +138,9 @@ def main():
     assert not leaked, f"leakage columns in features: {leaked}"
  
     is_test = split_by_patient(X, y, groups)
-    train = {"X": X[~is_test], "y": y[~is_test], "groups": groups[~is_test]}
-    test = {"X": X[is_test], "y": y[is_test], "groups": groups[is_test]}
- 
+    train = {"X": X[~is_test], "y": y[~is_test], "groups": groups[~is_test], "feature_set": feature_set}
+    test = {"X": X[is_test], "y": y[is_test], "groups": groups[is_test], "feature_set": feature_set}
+    
     # Checks: no patient in both sets, similar ICU rates
     overlap = set(train["groups"]) & set(test["groups"])
     assert not overlap, f"{len(overlap)} patients appear in both sets"
@@ -133,7 +156,14 @@ def main():
               f"{part['y'].mean():>10.1%}{part['X']['triage_bypassed'].mean():>10.1%}")
     print("\nPatients in both sets:", len(overlap))
     print("Saved to", out_dir)
- 
+
+    if feature_set == "B":
+        Xtr, ytr = train["X"], train["y"]
+        print(f"{'flag':<20}{'stays':>7}{'ICU rate':>10}")
+        for name in chief_complaint_flags:
+            on = Xtr[name] == 1
+            print(f"{name:<20}{on.sum():>7}{ytr[on].mean():>10.1%}")
+        print()
  
 if __name__ == "__main__":
     main()

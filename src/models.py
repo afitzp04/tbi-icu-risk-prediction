@@ -7,7 +7,7 @@ Output: data/models/model.joblib    fitted models, used in src/eval.py
         
 Run from project root folder
 
-Design notes:
+Notes:
 - testing set is not involved here, only in eval.py for final evaluation
 - each model = pipeline: preproccesor -> classifier
     - pipeline is re fitted for every CV folds so imputation median and scaling will be learned from training folds only
@@ -98,7 +98,7 @@ def candidate_models():
             {"model__num_leaves": [7, 15],
              "model__learning_rate": [0.03, 0.1]},
         )
-    except ImportError:
+    except Exception:
         # Skip if not installed
         print("lightgbm not installed: skip (pip install lightgbm)")
 
@@ -137,6 +137,10 @@ def main():
 
     train = pd.read_pickle(train_path)
     X, y, groups = train["X"], train["y"], train["groups"]
+
+    fs = train.get("feature_set", "A") # feature set built by preprocessing
+    print(f"Feature set {fs}: {X.shape[1]} features")
+    
     print(f"Training set: {len(y)} stays, {groups.nunique()} patients, ICU rate {y.mean():.1%}\n")
 
     model_dir.mkdir(parents = True, exist_ok = True)
@@ -146,20 +150,22 @@ def main():
     for name, (classifier, grid) in candidate_models().items():
         print(f"Tuning {name}...")
         best_model, row = tune(name, classifier, grid, X, y, groups)
-        joblib.dump(best_model, model_dir / f"{name}.joblib")
+        joblib.dump(best_model, model_dir / f"{name}_{fs}.joblib")
         rows.append(row)
         print(f"    best: {row['best_params']}")
         print(f"    Cross-Validation AUROC {row['auroc']:.3f} (sd {row['auroc_sd']:.3f}) | "
               f"recall {row['recall']:.3f} | F1 {row['f1']:.3f} | Brier {row['brier']:.3f}\n")
 
     summary = pd.DataFrame(rows)
-    summary.to_csv(results_dir / "cv.csv", index = False)
+    summary.insert(0, "feature_set", fs)
+    out_csv = results_dir / f"cv_results_{fs}.csv" # file per feature set to avoid writing over previous sets
+    summary.to_csv(results_dir / "out_csv", index = False)
 
     print("Cross-Validation summary (training set only and ESI baseline AUROC = 0.697):")
     print(summary[["model", "auroc", "auroc_sd", "recall", "precision", "f1", "brier"]]
           .to_string(index = False))
     print(f"\nModels saved to {model_dir}")
-    print(f"Summary saved to {results_dir / 'cv_results.csv'}")
+    print(f"Summary saved to {out_csv}")
 
 if __name__ == "__main__":
     main()
