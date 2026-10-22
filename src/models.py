@@ -30,6 +30,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
 
+from sklearn.neural_network import MLPClassifier
+
 from preprocessing import random_state, make_preprocessor
 
 # Paths
@@ -101,6 +103,17 @@ def candidate_models():
     except Exception:
         # Skip if not installed
         print("lightgbm not installed: skip (pip install lightgbm)")
+
+    # Neural network (multilayer perceptron): connected units will learn non linear patterns
+    # Small to match small dataset of approx 1800 stays
+    # MLPClassifier has no class_weight option but not necessary due to lack of imbalance
+
+    models["mlp"] = (
+        MLPClassifier(max_iter = 1000, early_stopping = True, random_state = random_state),
+        {"model__hidden_layer_sizes":[(16,), (32,), (32, 16)], # one/two hidden layers
+         "model__alpha": [0.01, 0.1, 1.0, 10.0]}, # regularisation strength
+    )
+
 
     return models
 
