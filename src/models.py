@@ -106,4 +106,60 @@ def candidate_models():
 
 # Tune
 
-def tune(name, classifier
+def tune(name, classifier, grid, X, y, groups):
+    """Grid search model with patient grouped CV
+    
+    Returns best pipeline that has been refitted on full training set and summary of CV scores
+    """
+
+    pipe = Pipeline([("prep", make_preprocessor()), ("model", classifier)])
+    cv = StratifiedGroupKFold(n_splits = n_folds, shuffle = True, random_state = random_state)
+
+    search = GridSearchCV(pipe, grid, scoring = scoring, refit = "auroc", cv = cv, n_jobs = -1)
+    search.fit(X, y, groups = groups)
+
+    # Scores of best hyperparameter setting, averaged over five folds
+    best = search.best_index_
+    res = search.cv_results_
+    row = {"model": name, "best_params": search.best_params_}
+    for metric in scoring:
+        mean, sd = res[f"mean_test_{metric}"][best], res[f"std_test_{metric}"][best]
+        if metric == "brier":
+            mean = -mean
+        row[metric] = round(mean, 3)
+        row[f"{metric}_sd"] = round(sd, 3)
+    return search.best_estimator_, row
+
+# Run
+
+def main():
+    warnings.filterwarnings("ignore", category = UserWarning)
+
+    train = pd.read_pickle(train_path)
+    X, y, groups = train["X"], train["y"], train["groups"]
+    print(f"Training set: {len(y)} stays, {groups.nunique()} patients, ICU rate {y.mean():.1%}\n")
+
+    model_dir.mkdir(parents = True, exist_ok = True)
+    results_dir.mkdir(parents = True, exist_ok = True)
+
+    rows = []
+    for name, (classifier, grid) in candidate_models().items():
+        print(f"Tuning {name}...")
+        best_model, row = tune(name, classifier, grid, X, y, groups)
+        joblib.dump(best_model, model_dir / f"{name}.joblib")
+        rows.append(row)
+        print(f"    best: {row['best_params']}")
+        print(f"    Cross-Validation AUROC {row['auroc']:.3f} (sd {row['auroc_sd']:.3f}) | "
+              f"recall {row['recall']:.3f} | F1 {row['f1']:.3f} | Brier {row['brier']:.3f}\n")
+
+    summary = pd.DataFrame(rows)
+    summary.to_csv(results_dir / "cv.csv", index = False)
+
+    print("Cross-Validation summary (training set only and ESI baseline AUROC = 0.697):")
+    print(summary[["model", "auroc", "auroc_sd", "recall", "precision", "f1", "brier"]]
+          .to_string(index = False))
+    print(f"\nModels saved to {model_dir}")
+    print(f"Summary saved to {results_dir / 'cv_results.csv'}")
+
+if __name__ == "__main__":
+    main()
