@@ -27,10 +27,11 @@ import joblib
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, RandomizedSearchCV
 from sklearn.pipeline import Pipeline
 
 from sklearn.neural_network import MLPClassifier
+from scipy.stats import loguniform, randint
 
 from preprocessing import random_state, make_preprocessor
 
@@ -42,6 +43,10 @@ model_dir = root / "data" / "models"
 results_dir = root / "results"
 
 n_folds = 5
+
+# Hyperparameter search: "grid" = small grids and "random" = wider randomised search
+search_type = "random"
+n_iter = 40 # random search
 
 # Scores
 
@@ -117,6 +122,47 @@ def candidate_models():
 
     return models
 
+# Random
+
+def random_distributions():
+    """Wider hyperparameter ranges, sampled at random n_iter times per model.
+
+    loguniform(a, b) samples evenly on a log scale (good for values spanning
+    several orders of magnitude); randint(a, b) samples whole numbers a to b-1.
+    """
+    return {
+        "logistic_regression": {
+            "model__C": loguniform(1e-3, 1e2),
+            "model__penalty": ["l1", "l2"],
+            "model__solver": ["liblinear"],            # supports both l1 and l2
+        },
+        "random_forest": {
+            "model__n_estimators": randint(200, 800),
+            "model__max_depth": [3, 4, 5, 6, 8, 10, 12, None],
+            "model__min_samples_leaf": randint(1, 50),
+            "model__max_features": ["sqrt", "log2", 0.5],
+        },
+        "xgboost": {
+            "model__n_estimators": randint(100, 800),
+            "model__max_depth": randint(2, 7),
+            "model__learning_rate": loguniform(0.01, 0.3),
+            "model__min_child_weight": randint(1, 20),
+            "model__reg_lambda": loguniform(0.1, 10),
+        },
+        "lightgbm": {
+            "model__n_estimators": randint(100, 800),
+            "model__num_leaves": randint(4, 32),
+            "model__learning_rate": loguniform(0.01, 0.3),
+            "model__min_child_samples": randint(5, 60),
+            "model__reg_lambda": loguniform(0.1, 10),
+        },
+        "mlp": {
+            "model__hidden_layer_sizes": [(8,), (16,), (32,), (64,), (16, 8), (32, 16)],
+            "model__alpha": loguniform(1e-3, 1e2),
+            "model__learning_rate_init": loguniform(1e-4, 1e-2),
+        },
+    }
+
 # Tune
 
 def tune(name, classifier, grid, X, y, groups):
@@ -128,7 +174,13 @@ def tune(name, classifier, grid, X, y, groups):
     pipe = Pipeline([("prep", make_preprocessor()), ("model", classifier)])
     cv = StratifiedGroupKFold(n_splits = n_folds, shuffle = True, random_state = random_state)
 
-    search = GridSearchCV(pipe, grid, scoring = scoring, refit = "auroc", cv = cv, n_jobs = -1)
+    if search_type == "random":
+        search = RandomizedSearchCV(pipe, random_distributions()[name], n_iter = n_iter,
+                                    scoring = scoring, refit = "auroc", cv = cv, n_jobs = -1,
+                                    random_state = random_state)
+    else:
+        search = GridSearchCV(pipe, grid, scoring = scoring, refit = "auroc", cv = cv, n_jobs = -1)
+
     search.fit(X, y, groups = groups)
 
     # Scores of best hyperparameter setting, averaged over five folds
@@ -163,7 +215,7 @@ def main():
     for name, (classifier, grid) in candidate_models().items():
         print(f"Tuning {name}...")
         best_model, row = tune(name, classifier, grid, X, y, groups)
-        joblib.dump(best_model, model_dir / f"{name}_{fs}.joblib")
+        joblib.dump(best_model, model_dir / f"{name}_{fs}_{search_type}.joblib")
         rows.append(row)
         print(f"    best: {row['best_params']}")
         print(f"    Cross-Validation AUROC {row['auroc']:.3f} (sd {row['auroc_sd']:.3f}) | "
@@ -171,7 +223,7 @@ def main():
 
     summary = pd.DataFrame(rows)
     summary.insert(0, "feature_set", fs)
-    out_csv = results_dir / f"cv_results_{fs}.csv" # file per feature set to avoid writing over previous sets
+    out_csv = results_dir / f"cv_results_{fs}_{search_type}.csv" # file per feature set to avoid writing over previous sets
     summary.to_csv(results_dir / out_csv, index = False)
 
     print("Cross-Validation summary (training set only and ESI baseline AUROC = 0.697):")
