@@ -1,0 +1,10 @@
+model,compared_with,auroc_difference,ci_low,ci_high,p_two_sided
+Logistic regression,ESI alone,0.0487,0.0327,0.0649,0.0
+Random forest,ESI alone,0.0434,0.0276,0.0591,0.0
+XGBoost,ESI alone,0.0489,0.0329,0.0649,0.0
+LightGBM,ESI alone,0.0477,0.0319,0.0643,0.0
+MLP,ESI alone,0.028,0.011,0.0446,0.004
+Random forest,Logistic regression,-0.0052,-0.0163,0.0054,0.356
+XGBoost,Logistic regression,0.0003,-0.0099,0.01,0.868
+LightGBM,Logistic regression,-0.001,-0.0122,0.0098,0.884
+MLP,Logistic regression,-0.0207,-0.032,-0.0082,0.0

@@ -1,6 +1,6 @@
 feature_set,model,best_params,auroc,auroc_sd,recall,recall_sd,precision,precision_sd,f1,f1_sd,brier,brier_sd
-B,logistic_regression,"{'model__C': np.float64(0.5414413211338525), 'model__penalty': 'l2', 'model__solver': 'liblinear'}",0.748,0.038,0.596,0.047,0.693,0.047,0.64,0.044,0.198,0.015
-B,random_forest,"{'model__max_depth': 6, 'model__max_features': 0.5, 'model__min_samples_leaf': 9, 'model__n_estimators': 232}",0.743,0.039,0.566,0.049,0.717,0.05,0.631,0.042,0.199,0.015
-B,xgboost,"{'model__learning_rate': np.float64(0.01754362390093243), 'model__max_depth': 2, 'model__min_child_weight': 7, 'model__n_estimators': 620, 'model__reg_lambda': np.float64(3.5033984911586877)}",0.747,0.036,0.545,0.045,0.726,0.039,0.621,0.036,0.196,0.014
-B,lightgbm,"{'model__learning_rate': np.float64(0.010017714720800423), 'model__min_child_samples': 17, 'model__n_estimators': 358, 'model__num_leaves': 10, 'model__reg_lambda': np.float64(0.21345764135358555)}",0.745,0.039,0.59,0.043,0.698,0.048,0.639,0.04,0.2,0.015
-B,mlp,"{'model__alpha': np.float64(4.446628955475449), 'model__hidden_layer_sizes': (32, 16), 'model__learning_rate_init': np.float64(0.0059487468132197715)}",0.739,0.032,0.537,0.048,0.725,0.037,0.616,0.039,0.2,0.011
+B,logistic_regression,"{'model__C': np.float64(0.6553013900933984), 'model__penalty': 'l2', 'model__solver': 'liblinear'}",0.747,0.035,0.595,0.049,0.692,0.039,0.639,0.041,0.198,0.014
+B,random_forest,"{'model__max_depth': 6, 'model__max_features': 0.5, 'model__min_samples_leaf': 9, 'model__n_estimators': 232}",0.743,0.038,0.57,0.049,0.718,0.049,0.634,0.041,0.199,0.015
+B,xgboost,"{'model__learning_rate': np.float64(0.01754362390093243), 'model__max_depth': 2, 'model__min_child_weight': 7, 'model__n_estimators': 620, 'model__reg_lambda': np.float64(3.5033984911586877)}",0.746,0.036,0.546,0.044,0.725,0.038,0.622,0.036,0.196,0.014
+B,lightgbm,"{'model__learning_rate': np.float64(0.010017714720800423), 'model__min_child_samples': 17, 'model__n_estimators': 358, 'model__num_leaves': 10, 'model__reg_lambda': np.float64(0.21345764135358555)}",0.745,0.039,0.589,0.042,0.698,0.049,0.638,0.04,0.199,0.015
+B,mlp,"{'model__alpha': np.float64(4.446628955475449), 'model__hidden_layer_sizes': (32, 16), 'model__learning_rate_init': np.float64(0.0059487468132197715)}",0.728,0.031,0.531,0.057,0.723,0.042,0.611,0.05,0.204,0.013

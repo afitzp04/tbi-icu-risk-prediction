@@ -69,7 +69,7 @@ def candidate_models():
         # Smaller = simpler
 
         "logistic_regression": (
-            LogisticRegression(class_weight = "balanced", max_iter = 2000),
+            LogisticRegression(class_weight = "balanced", max_iter = 2000, random_state = random_state),
             {"model__C": [0.01, 0.1, 1, 10]},
         ),
         
@@ -92,8 +92,7 @@ def candidate_models():
                           {"model__max_depth": [2, 3, 4],
                            "model__learning_rate": [0.03, 0.1]},
         )
-    except ImportError:
-        # Skip with message when library is not installed
+    except Exception:
         print("xgboost not installed: skip (pip install xgboost)")
 
     try:
@@ -117,6 +116,7 @@ def candidate_models():
         MLPClassifier(max_iter = 1000, early_stopping = True, random_state = random_state),
         {"model__hidden_layer_sizes":[(16,), (32,), (32, 16)], # one/two hidden layers
          "model__alpha": [0.01, 0.1, 1.0, 10.0]}, # regularisation strength
+    
     )
 
 
@@ -224,7 +224,7 @@ def main():
     summary = pd.DataFrame(rows)
     summary.insert(0, "feature_set", fs)
     out_csv = results_dir / f"cv_results_{fs}_{search_type}.csv" # file per feature set to avoid writing over previous sets
-    summary.to_csv(results_dir / out_csv, index = False)
+    summary.to_csv(out_csv, index = False)
 
     print("Cross-Validation summary (training set only and ESI baseline AUROC = 0.697):")
     print(summary[["model", "auroc", "auroc_sd", "recall", "precision", "f1", "brier"]]
