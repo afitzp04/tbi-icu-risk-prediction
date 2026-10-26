@@ -2,11 +2,11 @@
 
 Evaluation: performance of models compared to ESI baseline
 
-Input:  data/processed/train.pkl, data/processed/test.pkl    (src/preprocessing.py)
+Inputs:  data/processed/train.pkl, data/processed/test.pkl    (src/preprocessing.py)
         data/models/<model>_<set>_<search>.joblib            (src/models.py)
         data/interim/cohort.pkl                              (subgroup variables, ESI)
 
-Output: results/eval_<mode>_metrics.csv      performance of each model + ESI, with 95% CIs
+Outputs: results/eval_<mode>_metrics.csv      performance of each model + ESI, with 95% CIs
         results/eval_<mode>_comparisons.csv  AUROC differences vs ESI and vs logistic regression
         results/eval_<mode>_subgroups.csv    performance of the primary model in patient subgroups
         results/eval_<mode>_thresholds.csv   decision threshold chosen for each model
@@ -14,10 +14,10 @@ Output: results/eval_<mode>_metrics.csv      performance of each model + ESI, wi
         data/processed/predictions_<mode>.pkl   (patient-level predictions; not committed)
 
 
-- "dev":    evaluates OUT-OF-FOLD predictions on training set, used to build and
-            check evaluation (test set untouched)
-- "final":  evaluates held-out test set, ran once after models and features are frozen
-            and report results
+- dev:    evaluates OUT-OF-FOLD predictions on training set, used to build and
+          check evaluation (test set untouched)
+- final:  evaluates held-out test set, ran once after models and features are frozen
+          and report results
 
 Design notes
 - Decision thresholds chosen on out-of-fold training predictions (never on test set):

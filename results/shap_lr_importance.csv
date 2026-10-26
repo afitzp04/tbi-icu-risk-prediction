@@ -1,0 +1,26 @@
+feature,mean_abs_shap,coefficient,odds_ratio,odds_ratio_per
+ESI missing,0.324,1.2884,3.6269,yes vs no
+Triage bypassed,0.2686,0.6637,1.9419,yes vs no
+Age,0.1851,0.2247,1.252,1 SD
+Arrival: unknown,0.1756,0.9874,2.6842,yes vs no
+ESI 2,0.1657,-0.3449,0.7083,yes vs no
+Arrival: ambulance,0.1496,-0.4888,0.6134,yes vs no
+Complaint: fall,0.1392,-0.2841,0.7527,yes vs no
+ESI 3-5,0.1392,-1.0587,0.3469,yes vs no
+Complaint: high-energy impact,0.1126,-0.6394,0.5276,yes vs no
+Pain not assessable,0.1105,0.4769,1.6111,yes vs no
+Male,0.0973,0.1967,1.2173,yes vs no
+Complaint: transfer,0.0864,0.1881,1.207,yes vs no
+Arrival: walk-in,0.075,-0.6055,0.5458,yes vs no
+ESI 1,0.0666,0.2231,1.2499,yes vs no
+Complaint: ICH / head bleed,0.0609,0.2691,1.3088,yes vs no
+Complaint: altered mental state,0.0537,0.7172,2.0486,yes vs no
+Heart rate,0.048,0.071,1.0736,1 SD
+Diastolic BP,0.0448,0.0662,1.0684,1 SD
+Respiratory rate,0.0376,0.0531,1.0545,1 SD
+Complaint: SDH / SAH,0.0375,-0.083,0.9204,yes vs no
+Pain score,0.0253,0.0335,1.034,1 SD
+Arrival: helicopter,0.0099,0.2147,1.2394,yes vs no
+O2 saturation,0.0097,-0.0136,0.9865,1 SD
+Systolic BP,0.0096,-0.0138,0.9863,1 SD
+Temperature,0.0013,-0.0022,0.9978,1 SD
