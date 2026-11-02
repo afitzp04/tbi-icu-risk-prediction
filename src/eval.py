@@ -272,6 +272,47 @@ def subgroup_table(eval_cohort, X, y, p, esi, threshold, groups):
             rows.append(row)
     return pd.DataFrame(rows)
 
+# Sensitivity analysis for direct arrivals
+
+def sensitivity_direct(train, test, models, cohort):
+    """Sensitivity analysis: transferred-in patients removed from training AND evaluation.
+
+    The primary model is refitted (same hyperparameters) on direct arrivals only,
+    then compared with ESI on the same patients, with a paired patient bootstrap.
+    """
+    keep_tr = train["X"]["cc_transfer"] == 0
+    xtr = train["X"][keep_tr].drop(columns = "cc_transfer")    # flag is constant once transfers are removed
+    ytr = train["y"][keep_tr].values
+    gtr = train["groups"][keep_tr]
+    model = clone(models[primary])                            # same settings, unfitted
+
+    if mode == "final":
+        keep_te = test["X"]["cc_transfer"] == 0
+        x = test["X"][keep_te].drop(columns = "cc_transfer")
+        y = test["y"][keep_te].values
+        g = test["groups"][keep_te].values
+        p = model.fit(xtr, ytr).predict_proba(x)[:, 1]
+    else:
+        x, y, g = xtr, ytr, gtr.values
+        p = out_of_fold(model, xtr, ytr, gtr)
+
+    esi = esi_score(cohort, x.index)
+    boot_model, boot_esi = [], []
+    for idx in patient_bootstrap(g, n_boot):
+        boot_model.append(safe_auc(y[idx], p[idx]))
+        boot_esi.append(safe_auc(y[idx], esi[idx]))
+    boot_model, boot_esi = np.array(boot_model), np.array(boot_esi)
+    diff = boot_model - boot_esi
+
+    auc_model, auc_esi = safe_auc(y, p), safe_auc(y, esi)
+    return pd.DataFrame([{
+        "analysis": "direct arrivals only (transfers excluded)",
+        "stays": len(y), "patients": len(np.unique(g)), "icu_rate": y.mean(),
+        "auroc_model": auc_model, "model_ci_low": ci(boot_model)[0], "model_ci_high": ci(boot_model)[1],
+        "auroc_esi": auc_esi, "esi_ci_low": ci(boot_esi)[0], "esi_ci_high": ci(boot_esi)[1],
+        "difference": auc_model - auc_esi, "diff_ci_low": ci(diff)[0], "diff_ci_high": ci(diff)[1],
+    }])
+
 # Run
 
 def main():
@@ -343,6 +384,11 @@ def main():
     subgroups = subgroup_table(eval_cohort, X, y, preds[primary], preds["esi"], thresholds[primary], groups) \
         if primary in preds else pd.DataFrame()
 
+    # Sensitivity analysis: direct arrivals only
+    
+    print("Sensitivity analysis: refitting without transferred patients ...")
+    sensitivity = sensitivity_direct(train, test, models, cohort)
+
     # Save
 
     results_dir.mkdir(parents = True, exist_ok = True)
@@ -351,6 +397,7 @@ def main():
     metrics.round(3).to_csv(results_dir / f"eval_{tag}_metrics.csv")
     comparisons.round(4).to_csv(results_dir / f"eval_{tag}_comparisons.csv", index = False)
     subgroups.round(3).to_csv(results_dir / f"eval_{tag}_subgroups.csv", index = False)
+    sensitivity.round(3).to_csv(results_dir / f"eval_{tag}_sensitivity.csv", index = False)
     
     pd.Series(thresholds, name = "threshold").round(4).to_csv(results_dir / f"eval_{tag}_thresholds.csv")
    
@@ -376,6 +423,8 @@ def main():
                         "auroc_model_ci_high", "auroc_esi", "gain_vs_esi", "gain_ci_low", "gain_ci_high",
                         "sensitivity", "specificity", "note"] if c in subgroups]
     print(subgroups[cols].round(3).to_string(index = False))
+    print("\nSensitivity analysis (direct arrivals only):")
+    print(sensitivity.round(3).T.to_string(header=False))
     print(f"\nSaved results/eval_{tag}_*.csv and results/fig_{tag}_*.png")
 
 if __name__ == "__main__":

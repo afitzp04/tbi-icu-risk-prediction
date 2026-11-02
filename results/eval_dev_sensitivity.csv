@@ -1,0 +1,2 @@
+analysis,stays,patients,icu_rate,auroc_model,model_ci_low,model_ci_high,auroc_esi,esi_ci_low,esi_ci_high,difference,diff_ci_low,diff_ci_high
+direct arrivals only (transfers excluded),1172,1154,0.43,0.747,0.721,0.777,0.728,0.7,0.753,0.02,0.004,0.036

@@ -6,10 +6,11 @@ Input:  data/processed/train.pkl                      (src/preprocessing.py)
         data/models/<model>_<set>_<search>.joblib     (src/models.py)
 
         Output:
-        results/shap_lr_importance.csv    mean |SHAP|, coefficient and odds ratio per feature
-        results/shap_comparison.csv       feature ranking: logistic regression vs XGBoost
-        results/fig_shap_lr_summary.png   SHAP summary (beeswarm) plot, logistic regression
-        results/fig_shap_lr_bar.png       mean |SHAP| bar chart, logistic regression
+        results/shap_lr_importance.csv       mean |SHAP|, coefficient and odds ratio per feature
+        results/shap_comparison.csv          feature ranking: logistic regression vs XGBoost
+        results/fig_shap_lr_summary.png      SHAP summary (beeswarm) plot, logistic regression
+        results/fig_shap_lr_bar.png          mean |SHAP| bar chart, logistic regression
+        results/explanatory_odds_ratios.csv  adjusted odds ratios with 95% CIs (explanatory model)
 
 Design notes:
 - SHAP (SHapley Additive exPlanations) splits each prediction into a contribution
@@ -132,6 +133,7 @@ def explanatory_odds_ratios(X, y):
     Missing continuous values are filled with training median (triage_bypassed
     flag carries the information that they were missing). Columns that do not vary
     and reference categories are dropped
+    
     """
 
     from sklearn.linear_model import LogisticRegression
@@ -143,6 +145,7 @@ def explanatory_odds_ratios(X, y):
     Z = Z.loc[:, Z.nunique() > 1].astype(float)
 
     model = LogisticRegression(penalty = None, max_iter = 10000).fit(Z, y)
+    
     # Standard errors from the inverse of the information matrix X'WX (with intercept)
     D = np.column_stack([np.ones(len(Z)), Z.values])
     p = model.predict_proba(Z)[:, 1]
@@ -190,3 +193,128 @@ def plot_odds_ratios(table, path):
     fig.savefig(path, dpi = 300, bbox_inches = "tight")
     
     plt.close(fig)
+
+# Figures
+
+def plot_bar(importance, path):
+    top = importance.head(top_n).iloc[::-1]
+    fig, ax = plt.subplots(figsize = (7, 0.32 * len(top) + 1.2))
+    ax.barh([label(f) for f in top.index], top.values, color = accent, height = 0.6)
+    for i, v in enumerate(top.values):
+        ax.text(v, i, f" {v:.3f}", va="center", fontsize = 8, color = "#3f3f3c")
+    ax.set_xlabel("Mean |SHAP value| (average impact on log-odds of ICU admission)")
+    ax.set_title("Most influential features, logistic regression (training set)", loc = "left", fontsize = 11)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_xlim(0, top.values.max() * 1.18)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 300, bbox_inches = "tight")
+    plt.close(fig)
+
+def plot_summary(shap_values, X_raw, importance, path, seed=42):
+    """
+    Beeswarm-style summary: one dot per patient per feature.
+    Position = SHAP value, colour = the patient's feature value (light = low, dark = high)
+    """
+    
+    feats = list(importance.head(top_n).index)[::-1]
+    rng = np.random.default_rng(seed)
+    rows = rng.choice(len(shap_values), size = min(max_points, len(shap_values)), replace = False)
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("blue", ["#cde2fb", "#2a78d6", "#0d366b"])
+
+    fig, ax = plt.subplots(figsize = (7.5, 0.36 * len(feats) + 1.6))
+    for i, f in enumerate(feats):
+        s = shap_values[f].values[rows]
+        raw = X_raw[f].values[rows].astype(float) if f in X_raw else np.full(len(rows), np.nan)
+        # colour by rank in feature (robust for outliers) and missing raw values in grey
+        known = ~np.isnan(raw)
+        colour_val = np.full(len(raw), np.nan)
+        if known.sum() > 1:
+            colour_val[known] = pd.Series(raw[known]).rank(pct=True).values
+        jitter = rng.normal(0, 0.08, len(s))
+        ax.scatter(s[~known], i + jitter[~known], s = 6, color = "#c3c2b7", alpha = 0.7, linewidths = 0)
+        ax.scatter(s[known], i + jitter[known], s = 6, c = colour_val[known], cmap = cmap, vmin = 0, vmax = 1,
+                   alpha = 0.8, linewidths = 0)
+        
+    ax.axvline(0, color = "#8a8984", lw =  0.8)
+    ax.set_yticks(range(len(feats)), [label(f) for f in feats], fontsize = 9)
+    ax.set_xlabel("SHAP value (impact on log-odds of ICU admission)  <- lowers risk | raises risk ->")
+    ax.set_title("How each feature shifts predicted ICU risk, logistic regression", loc = "left", fontsize = 11)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    sm = plt.cm.ScalarMappable(cmap = cmap, norm = plt.Normalize(0, 1))
+    cbar = fig.colorbar(sm, ax = ax, fraction = 0.03, pad = 0.02, ticks = [0, 1])
+    cbar.ax.set_yticklabels(["Low", "High"], fontsize = 8)
+    cbar.set_label("Feature value (grey = missing, imputed)", fontsize = 8)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 300, bbox_inches = "tight")
+    plt.close(fig)
+
+# Run
+
+def main():
+    warnings.filterwarnings("ignore")
+    train = pd.read_pickle(processed / "train.pkl")
+    X = train["X"]
+    fs = train.get("feature_set", "A")
+    results_dir.mkdir(parents = True, exist_ok = True)
+
+    # Logistic regression (primary model): exact linear SHAP
+    lr = joblib.load(model_dir / f"logistic_regression_{fs}_{search_type}.joblib")
+    print(f"Logistic regression, feature set {fs}: {len(X)} training stays")
+    lr_shap, Xt, coef = linear_shap(lr, X)
+    check_against_library(lr, Xt, lr_shap)
+
+    # Check patient's log-odds = the same baseline + the sum of their SHAP values
+    baseline = lr.decision_function(X) - lr_shap.sum(axis = 1).values
+    print(f"  additivity check (spread of baseline, should be ~0): {baseline.std():.2e}")
+
+    importance = lr_shap.abs().mean().sort_values(ascending = False)
+    # Odds ratio per unit of preprocessed feature: per 1 SD for continuous features
+    # (they are standardised), yes vs no for 0/1 flags
+    binary = {f for f in X.columns if set(X[f].dropna().unique()) <= {0, 1}}
+    table = pd.DataFrame({
+        "feature": [label(f) for f in importance.index],
+        "mean_abs_shap": importance.values,
+        "coefficient": coef[importance.index].values,
+        "odds_ratio": np.exp(coef[importance.index].values),
+        "odds_ratio_per": ["yes vs no" if f in binary else "1 SD" for f in importance.index],
+    })
+
+    table.round(4).to_csv(results_dir / "shap_lr_importance.csv", index = False)
+    plot_bar(importance, results_dir / "fig_shap_lr_bar.png")
+    plot_summary(lr_shap, X, importance, results_dir / "fig_shap_lr_summary.png")
+
+    pd.set_option("display.width", 200)
+    print(f"\nTop {top_n} features, logistic regression (training set):")
+    print(table.head(top_n).round(3).to_string(index = False))
+
+    # Explanatory model: interpretable adjusted odds ratios
+    
+    ors = explanatory_odds_ratios(X, train["y"].values)
+    ors.round(4).to_csv(results_dir / "explanatory_odds_ratios.csv", index = False)
+    plot_odds_ratios(ors, results_dir / "fig_odds_ratios.png")
+    print("\nAdjusted odds ratios (reference: ESI 2, ambulance arrival, training set):")
+    print(ors.round(3).to_string(index = False))
+
+    # XGBoost: whether non-linear model relies on the same features
+
+    xgb_path = model_dir / f"xgboost_{fs}_{search_type}.joblib"
+    try:
+        xgb_shap = tree_shap(joblib.load(xgb_path), X)
+        xgb_importance = xgb_shap.abs().mean()
+        both = pd.DataFrame({"lr_mean_abs_shap": importance, "xgb_mean_abs_shap": xgb_importance})
+        both["lr_rank"] = both["lr_mean_abs_shap"].rank(ascending = False).astype(int)
+        both["xgb_rank"] = both["xgb_mean_abs_shap"].rank(ascending = False).astype(int)
+        both = both.sort_values("lr_rank")
+        both.index = [label(f) for f in both.index]
+        both.round(4).to_csv(results_dir / "shap_comparison.csv")
+        rho = spearmanr(both["lr_rank"], both["xgb_rank"]).correlation
+        print(f"\nFeature ranking, logistic regression vs XGBoost (Spearman rho = {rho:.2f}):")
+        print(both.head(top_n)[["lr_rank", "xgb_rank"]].to_string())
+    
+    except Exception as err:
+        print(f"\n(XGBoost comparison skipped: {err.__class__.__name__}: {err}. Try: pip install shap)")
+
+    print("\nSaved results/shap_*.csv and results/fig_shap_lr_*.png")
+
+if __name__ == "__main__":
+    main()
