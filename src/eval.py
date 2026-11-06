@@ -46,6 +46,7 @@ from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, roc_auc_score, roc_curve
 from sklearn.model_selection import StratifiedGroupKFold, cross_val_predict
+from sklearn.metrics import average_precision_score
 
 from preprocessing import random_state
 
@@ -209,6 +210,49 @@ def plot_calibration(y, preds, path, title):
     fig.savefig(path, dpi = 300, bbox_inches = "tight")
     plt.close(fig)
 
+# Decision curve
+
+def net_benefit(y, p, thresholds):
+    """
+    Net benefit = true positives/n - false positives/n x (odds of the threshold)
+    """
+    
+    n = len(y)
+    out = []
+    for t in thresholds:
+        pred = p >= t
+        tp, fp = np.sum(pred & (y == 1)), np.sum(pred & (y == 0))
+        out.append(tp / n - fp / n * t / (1 - t))
+    return np.array(out)
+
+def plot_decision_curve(y, preds, path, title):
+    """
+    Decision curve: net benefit of each model vs 'treat all' and 'treat none'
+    """
+    
+    thr = np.round(np.arange(0.05, 0.81, 0.01), 2)
+    prev = y.mean()
+    treat_all = prev - (1 - prev) * thr / (1 - thr)
+    table = pd.DataFrame({"threshold": thr, "treat_all": treat_all, "treat_none": 0.0})
+
+    fig, ax = plt.subplots(figsize = (6.5, 5))
+    ax.plot(thr, treat_all, color = "#8a8984", lw = 1.2, label = "Treat all as ICU")
+    ax.axhline(0, color = "#c3c2b7", lw = 1.2, ls = ":", label = "Treat none")
+    for name, p in preds.items():
+        if name == "esi":
+            continue # ESI is  rank, not probability
+        nb = net_benefit(y, p, thr)
+        table[labels[name]] = nb
+        ax.plot(thr, nb, color = colours[name], lw = 2 , label = labels[name])
+    ax.set(xlabel = "Threshold probability of ICU admission", ylabel = "Net benefit",
+           title = title, xlim = (0.05, 0.8), ylim = (-0.05, prev + 0.05))
+    ax.legend(loc = "upper right", fontsize = 8.5, frameon = False)
+    style(ax)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 300, bbox_inches = "tight")
+    plt.close(fig)
+    return table
+
 # Subgroups
 
 def race_group(race):
@@ -346,7 +390,7 @@ def main():
 
     rows = []
     for name, p in preds.items():
-        row = {"model": labels[name], "auroc": safe_auc(y, p)}
+        row = {"model": labels[name], "auroc": safe_auc(y, p), "auprc": average_precision_score(y, p)}
         if name != "esi":
             row.update({"brier": brier_score_loss(y, p), "calibration_slope": calibration_slope(y, p),
                         "threshold": thresholds[name], **classification_metrics(y, p, thresholds[name])})
@@ -408,11 +452,16 @@ def main():
     pd.to_pickle({"y": y, "groups": groups, "index": X.index, "preds": preds, "thresholds": thresholds},
                  processed / f"predictions_{tag}.pkl")
 
+    #Decision curve
+    decision = plot_decision_curve(y, preds, results_dir / f"fig_{tag}_decision_curve.png",
+                                   f"Decision curve ({where})")
+    decision.round(4).to_csv(results_dir / f"eval_{tag}_decision_curve.csv", index=False)
+
     # Print summary
 
     pd.set_option("display.width", 200)
    
-    show = ["auroc", "auroc_ci_low", "auroc_ci_high", "brier", "calibration_slope",
+    show = ["auroc", "auroc_ci_low", "auroc_ci_high", "auprc", "brier", "calibration_slope",
             "sensitivity", "specificity", "ppv", "flagged_%"]
     print(f"\nPerformance ({where}); thresholds set for {target_recall:.0%} recall on training data:")
     print(metrics[show].round(3).to_string())
