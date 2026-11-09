@@ -1,0 +1,6 @@
+feature_set,model,best_params,auroc,auroc_sd,recall,recall_sd,precision,precision_sd,f1,f1_sd,brier,brier_sd
+B_noesi,logistic_regression,"{'model__C': np.float64(0.9761125443110458), 'model__penalty': 'l2', 'model__solver': 'liblinear'}",0.733,0.036,0.581,0.051,0.706,0.038,0.637,0.041,0.203,0.013
+B_noesi,random_forest,"{'model__max_depth': 5, 'model__max_features': 'sqrt', 'model__min_samples_leaf': 5, 'model__n_estimators': 417}",0.727,0.032,0.538,0.046,0.735,0.048,0.62,0.041,0.204,0.012
+B_noesi,xgboost,"{'model__learning_rate': np.float64(0.01754362390093243), 'model__max_depth': 2, 'model__min_child_weight': 7, 'model__n_estimators': 620, 'model__reg_lambda': np.float64(3.5033984911586877)}",0.734,0.033,0.552,0.043,0.729,0.046,0.627,0.038,0.2,0.013
+B_noesi,lightgbm,"{'model__learning_rate': np.float64(0.010017714720800423), 'model__min_child_samples': 17, 'model__n_estimators': 358, 'model__num_leaves': 10, 'model__reg_lambda': np.float64(0.21345764135358555)}",0.731,0.034,0.575,0.047,0.698,0.041,0.63,0.039,0.203,0.013
+B_noesi,mlp,"{'model__alpha': np.float64(0.17885301261862016), 'model__hidden_layer_sizes': (16,), 'model__learning_rate_init': np.float64(0.007902619549708232)}",0.717,0.03,0.561,0.028,0.695,0.029,0.62,0.019,0.209,0.009

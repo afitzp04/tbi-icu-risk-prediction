@@ -244,6 +244,17 @@ def plot_decision_curve(y, preds, path, title):
         nb = net_benefit(y, p, thr)
         table[labels[name]] = nb
         ax.plot(thr, nb, color = colours[name], lw = 2 , label = labels[name])
+
+    # Currently triage-bypassed patients count as highest acuity in esi_score
+    if "esi" in preds:
+        rules = {"ESI rule: ICU if ESI 1 or bypassed": -1,
+                 "ESI rule: ICU if ESI 1-2 or bypassed": -2,}
+        for (rule, cut), ls in zip(rules.items(),["--", "-."]):
+            flagged = (preds["esi"] >= cut).astype(float) # 1 = sent to ICU by the rule
+            nb = net_benefit(y, flagged, thr)
+            table[rule] = nb
+            ax.plot(thr, nb, color = colours["esi"], lw = 1.6, ls = ls, label = rule)
+
     ax.set(xlabel = "Threshold probability of ICU admission", ylabel = "Net benefit",
            title = title, xlim = (0.05, 0.8), ylim = (-0.05, prev + 0.05))
     ax.legend(loc = "upper right", fontsize = 8.5, frameon = False)

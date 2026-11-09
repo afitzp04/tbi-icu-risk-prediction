@@ -32,6 +32,8 @@ outcome = "icu_24h"
 # Secondary feature sets
 # A = baseline, B = A + chief complaint flags, C = B + derived vitals
 feature_set = ("B")
+# drop_esi = True -> ablation, removes ESI acuity columns: how much does model add beyond ESI
+drop_esi = False
 
 # Chief complaint flags are yes/no when free-text complaint matches pattern
 # Groups chosen for clinical reasons and checked only on training set
@@ -151,6 +153,10 @@ def main():
     assert cohort["stay_id"].is_unique, "duplicate ED stays in cohort"
  
     X = build_features(cohort)
+    fs_tag = feature_set
+    if drop_esi:
+        X = X.drop(columns = [c for c in X.columns if c.startswith("esi_")])
+        fs_tag = f"{feature_set}_noesi"
     y = cohort[outcome].astype(int)
     groups = cohort["subject_id"]
  
@@ -159,8 +165,8 @@ def main():
     assert not leaked, f"leakage columns in features: {leaked}"
  
     is_test = split_by_patient(X, y, groups)
-    train = {"X": X[~is_test], "y": y[~is_test], "groups": groups[~is_test], "feature_set": feature_set}
-    test = {"X": X[is_test], "y": y[is_test], "groups": groups[is_test], "feature_set": feature_set}
+    train = {"X": X[~is_test], "y": y[~is_test], "groups": groups[~is_test], "feature_set": fs_tag}
+    test = {"X": X[is_test], "y": y[is_test], "groups": groups[is_test], "feature_set": fs_tag}
     
     # Checks: no patient in both sets, similar ICU rates
     overlap = set(train["groups"]) & set(test["groups"])
