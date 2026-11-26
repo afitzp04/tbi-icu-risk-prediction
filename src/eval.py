@@ -2,26 +2,31 @@
 
 Evaluation: performance of models compared to ESI baseline
 
-Inputs:  data/processed/train.pkl, data/processed/test.pkl    (src/preprocessing.py)
+Inputs: data/processed/train.pkl, data/processed/test.pkl    (src/preprocessing.py)
         data/models/<model>_<set>_<search>.joblib            (src/models.py)
         data/interim/cohort.pkl                              (subgroup variables, ESI)
 
-Outputs: results/eval_<mode>_metrics.csv      performance of each model + ESI, with 95% CIs
-        results/eval_<mode>_comparisons.csv  AUROC differences vs ESI and vs logistic regression
-        results/eval_<mode>_subgroups.csv    performance of the primary model in patient subgroups
-        results/eval_<mode>_thresholds.csv   decision threshold chosen for each model
-        results/fig_<mode>_roc.png, results/fig_<mode>_calibration.png
-        data/processed/predictions_<mode>.pkl   (patient-level predictions; not committed)
+Outputs:
+        results/eval_<mode>_metrics.csv        performance of each model + ESI, with 95% CIs
+        results/eval_<mode>_comparisons.csv     AUROC differences vs ESI and vs logistic regression
+        results/eval_<mode>_subgroups.csv       performance of the primary model in patient subgroups
+        results/eval_<mode>_thresholds.csv      decision threshold chosen for each model
+        results/fig_<mode>_sensitivity.csv      direct arrivals sensitivity analysis
+        results/fig_<mode>_decision_curve.csv   net benefit by threshold
+        results/fig_<mode>_decision_curve.png
+        results/fig_<mode>_roc.png
+        results/fig_<mode>_calibration.png
+        data/processed/predictions_<mode>.pkl  patient-level predictions; not committed
 
-
+Modes:
 - dev:    evaluates OUT-OF-FOLD predictions on training set, used to build and
           check evaluation (test set untouched)
 - final:  evaluates held-out test set, ran once after models and features are frozen
           and report results
 
-Design notes
+Design notes:
 - Decision thresholds chosen on out-of-fold training predictions (never on test set):
-  lowest-risk cut-off that still catches target_recall of ICU patients
+  highest cut off that still catches target_recall of ICU patients -> fewest false alarms
 - 95% confidence intervals come from bootstrap resampling patients so repeat visits
   stay together. The same resamples are used for every model so differences between
   models will be paired
@@ -54,8 +59,8 @@ from preprocessing import random_state
 
 mode = "dev"                       # dev: out-of-fold training predictions, final: test set (run once)
 search_type = "random"             # which tuned models to load
-primary = "logistic_regression"    # pre-specified primary model (best in CV)
-target_recall = 0.80               # catch > 80% of ICU patients (triage: misses cost more than false alarms)
+primary = "logistic_regression"    # simplest of equally best models in CV
+target_recall = 0.80               # catch ≥ 80% of ICU patients (triage: misses cost more than false alarms)
 n_boot = 1000                      # bootstrap resamples for confidence intervals
 min_cell = 10                      # suppress subgroup results based on fewer stays than this
 n_folds = 5
@@ -70,7 +75,8 @@ model_names = ["logistic_regression", "random_forest", "xgboost", "lightgbm", "m
 labels = {"logistic_regression": "Logistic regression", "random_forest": "Random forest",
           "xgboost": "XGBoost", "lightgbm": "LightGBM", "mlp": "MLP", "esi": "ESI alone"}
 
-# Validated categorical palette (fixed order); ESI drawn as a grey dashed reference line
+# fixed colour per model so figures match
+# ESI is grey dashed reference line
 colours = {"logistic_regression": "#2a78d6", "random_forest": "#eb6834", "xgboost": "#1baf7a",
            "lightgbm": "#eda100", "mlp": "#e87ba4", "esi": "#6b6b66"}
 
@@ -96,7 +102,7 @@ def load():
     cohort = pd.read_pickle(cohort_path).reset_index(drop=True)
     for part in (train, test):
         assert (cohort.loc[part["X"].index, "subject_id"].values == part["groups"].values).all(), \
-            "cohort.pkl dfoes not match saved split: rerun preprocessing.py"
+            "cohort.pkl does not match saved split: rerun preprocessing.py"
         
     return train, test, cohort, models, fs
 
@@ -143,6 +149,8 @@ def classification_metrics(y, p, threshold):
             "flagged_%": 100 * pred.mean()}
 
 def safe_auc(y, p):
+    """AUROC or NaN if only one class is present -> may occur in small bootstrap sample
+    """
     return roc_auc_score(y, p) if len(np.unique(y)) == 2 else np.nan
 
 def patient_bootstrap(groups, n_boot, seed = random_state):
@@ -157,12 +165,14 @@ def patient_bootstrap(groups, n_boot, seed = random_state):
         yield np.concatenate([rows_of[pt] for pt in drawn])
 
 def ci(values):
+    """95% percentile interval and ignoring NaNs
+    """
     v = np.asarray(values, dtype=float)
     v = v[~np.isnan(v)]
     return (np.percentile(v, 2.5), np.percentile(v, 97.5)) if len(v) else (np.nan, np.nan)
 
 def calibration_slope(y, p):
-    """Slope of logistic regression of outcome on logit(predicted risk)
+    """Calibration slope:
     1 = well calibrated
     < 1 = predictions too extreme
     > 1 = too cautious
@@ -199,7 +209,7 @@ def plot_calibration(y, preds, path, title):
     ax.plot([0, 1], [0, 1], color = "#c3c2b7", lw = 1, ls = ":", label = "Perfect calibration")
     for name, p in preds.items():
         if name == "esi":
-            continue # ESI is a rank, not a probability
+            continue # ESI is rank, not a probability
         obs, pred = calibration_curve(y, p, n_bins = 10, strategy = "quantile")
         ax.plot(pred, obs, color = colours[name], lw = 2, marker = "o", ms = 4, label = labels[name])
     ax.set(xlabel = "Predicted risk of ICU admission", ylabel = "Observed proportion admitted to ICU",
@@ -226,8 +236,7 @@ def net_benefit(y, p, thresholds):
     return np.array(out)
 
 def plot_decision_curve(y, preds, path, title):
-    """
-    Decision curve: net benefit of each model vs 'treat all' and 'treat none'
+    """Decision curve: net benefit of each model vs 'treat all' and 'treat none'
     """
     
     thr = np.round(np.arange(0.05, 0.81, 0.01), 2)
@@ -245,7 +254,7 @@ def plot_decision_curve(y, preds, path, title):
         table[labels[name]] = nb
         ax.plot(thr, nb, color = colours[name], lw = 2 , label = labels[name])
 
-    # Currently triage-bypassed patients count as highest acuity in esi_score
+    # ESI rules as fixed strategies -> bypassed counts as most urgent, as in esi_score
     if "esi" in preds:
         rules = {"ESI rule: ICU if ESI 1 or bypassed": -1,
                  "ESI rule: ICU if ESI 1-2 or bypassed": -2,}
@@ -387,7 +396,7 @@ def main():
     # Evaluation data
 
     if mode == "final":
-        print("\n*** Final mode: evaluate the held-out testing sset. Run only once. ***\n")
+        print("\n*** Final mode: evaluate the held-out testing set. Run only once. ***\n")
         X, y, groups = test["X"], test["y"].values, test["groups"].values
         preds = {name: m.predict_proba(X)[:, 1] for name, m in models.items()}
     else:
@@ -463,7 +472,8 @@ def main():
     pd.to_pickle({"y": y, "groups": groups, "index": X.index, "preds": preds, "thresholds": thresholds},
                  processed / f"predictions_{tag}.pkl")
 
-    #Decision curve
+    # Decision curve
+    
     decision = plot_decision_curve(y, preds, results_dir / f"fig_{tag}_decision_curve.png",
                                    f"Decision curve ({where})")
     decision.round(4).to_csv(results_dir / f"eval_{tag}_decision_curve.csv", index=False)
