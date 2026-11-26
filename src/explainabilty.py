@@ -2,24 +2,24 @@
 
 Explainability: which features drive the models' predictions using SHAP
 
-Input:  data/processed/train.pkl                      (src/preprocessing.py)
+Inputs:  data/processed/train.pkl                      (src/preprocessing.py)
         data/models/<model>_<set>_<search>.joblib     (src/models.py)
 
-        Output:
+Outputs:
         results/shap_lr_importance.csv       mean |SHAP|, coefficient and odds ratio per feature
         results/shap_comparison.csv          feature ranking: logistic regression vs XGBoost
+        results/explanatory_odds_ratios.csv  adjusted odds ratios with 95% CIs (explanatory model)
         results/fig_shap_lr_summary.png      SHAP summary (beeswarm) plot, logistic regression
         results/fig_shap_lr_bar.png          mean |SHAP| bar chart, logistic regression
-        results/explanatory_odds_ratios.csv  adjusted odds ratios with 95% CIs (explanatory model)
 
 Design notes:
 - SHAP (SHapley Additive exPlanations) splits each prediction into a contribution
-  from every feature. Positive values push patient's predicted ICU risk up, and
-  negative values push it down (values are on the log-odds scale)
+  from every feature. SHAP values are on the log-odds scale. Positive = pushes predicted
+  ICU risk up, negative = down
 - Explanations computed on the training set so testing set stays untouched
 - Logistic regression (the primary model): with linear model, SHAP value of
   feature j for patient is exactly  coefficient_j x (patient's value_j - average value_j),
-  computed on the preprocessed features. This is returned by shap.LinearExplainer
+  computed on the preprocessed features. This is computed and checked by shap.LinearExplainer
 
 """
 
@@ -47,25 +47,25 @@ processed = root / "data" / "processed"
 model_dir = root / "data" / "models"
 results_dir = root / "results"
 
-# Readable names for writing report
+# Readable feature names for figures/tables/report
 
-nice = {
+feature_labels = {
     "age": "Age", "temperature": "Temperature", "heartrate": "Heart rate", "resprate": "Respiratory rate",
     "o2sat": "O2 saturation", "sbp": "Systolic BP", "dbp": "Diastolic BP", "pain_score": "Pain score",
     "male": "Male", "triage_bypassed": "Triage bypassed", "pain_unable": "Pain not assessable",
     "esi_1": "ESI 1", "esi_2": "ESI 2", "esi_3plus": "ESI 3-5", "esi_missing": "ESI missing",
     "arrival_ambulance": "Arrival: ambulance", "arrival_helicopter": "Arrival: helicopter",
-    "arrival_walk_in": "Arrival: walk-in", "arrival_unknown": "Arrival: unknown", "arrival_other": "Arrival: other",
+    "arrival_walk_in": "Arrival: walk-in", "arrival_unknown": "Arrival: unknown",
     "cc_ich": "Complaint: ICH / head bleed", "cc_sdh_sah": "Complaint: SDH / SAH",
     "cc_transfer": "Complaint: transfer", "cc_impact": "Complaint: high-energy impact",
-    "cc_high_energy": "Complaint: high-energy impact", "cc_altered_mental": "Complaint: altered mental state",
+    "cc_altered_mental": "Complaint: altered mental state",
     "cc_fall": "Complaint: fall", "shock_index": "Shock index",
 }
 
 accent = "#2a78d6"
 
 def label(name):
-    return nice.get(name, name)
+    return feature_labels.get(name, name)
 
 # SHAP values
 
@@ -96,7 +96,6 @@ def check_against_library(pipe, Xt, shap_values):
     try:
         import shap
     except ImportError:
-        # make sure installed
         print("  (shap not installed: skipping the library cross-check)")
         return
     explainer = shap.LinearExplainer(pipe.named_steps["model"],
@@ -314,7 +313,7 @@ def main():
     except Exception as err:
         print(f"\n(XGBoost comparison skipped: {err.__class__.__name__}: {err}. Try: pip install shap)")
 
-    print("\nSaved results/shap_*.csv and results/fig_shap_lr_*.png")
+    print("\nSaved results/shap_*.csv, results/explanatory_odds_ratios.csv and results/fig_*.png")
 
 if __name__ == "__main__":
     main()
