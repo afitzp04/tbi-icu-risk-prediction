@@ -227,7 +227,7 @@ def main():
     print("Features (" + str(X.shape[1]) + "):", list(X.columns))
     print()
     for name, part in [("train", train), ("test", test)]:
-        print(name, ":", len(part["y"]), "stays,", part["groups"].nunique(), "patients",
+        print(name, ":", len(part["y"]), "stays,", part["groups"].nunique(), "patients,",
               "ICU rate", round(part["y"].mean() * 100, 1), "%,",
               "bypassed", round(part["X"]["triage_bypassed"].mean() * 100, 1), "%")
     print("\nPatients in both sets:", len(overlap))
