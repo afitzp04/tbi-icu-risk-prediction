@@ -1,15 +1,17 @@
-""" Pre-processing: turn the cleaned TBI cohort into model-ready training
+"""Pre-processing: make the cohort ready for model training
 
-Input: data/interim/cohort.pkl      (saved at the end of notebooks/explorations/ipynb)
-Output: data/processed/train.pkl    (features, outcome, and patientts IDs for training)
-        data/processed/test.pkl     (same applies for held-out test set)
+Inputs: data/interim/cohort.pkl      (saved at end of notebooks/explorations.ipynb)
+Outputs: data/processed/train.pkl    (features, outcome, and patients IDs for training)
+        data/processed/test.pkl     (same for held-out test set)
 
 Design notes:
 - only information available at ED triage is used as feature
-- steps that learn from data (filling missing values, scaling) are not applied
-- steps defined by make_preprocessor() and fitted later on training data only, inside cross validation, so no information leaks from test set
-- train/test split is by patient so no patient appears in both sets
+- steps that learn from data (filling missing values, scaling) not applied
+- steps defined by make_preprocessor() and fitted later on training data only, inside cross validation -> no information leaks from test set
+- train/test split by patient so no patient appears in both sets
 """
+
+# Imports
 
 from pathlib import Path
 
@@ -23,96 +25,113 @@ from sklearn.preprocessing import StandardScaler
 
 # Settings
 
+# locations of script and root
 root = Path(__file__).resolve().parents[1] # project root folder
 cohort_path = root / "data" / "interim" / "cohort.pkl"
 out_dir = root / "data" / "processed"
 
+# column used to predict model where 1 = yes, 0 = no
 outcome = "icu_24h"
 
 # Secondary feature sets
-# A = baseline, B = A + chief complaint flags, C = B + derived vitals
+
+# A = baseline (vitals, age, sex...), B = A + chief complaint flags, C = B + derived vitals
 feature_set = ("B")
-# drop_esi = True -> ablation, removes ESI acuity columns: how much does model add beyond ESI
+
+# Ablation
+# drop_esi = True -> removes ESI acuity columns: how much does model add beyond ESI
 drop_esi = False
 
-# Chief complaint flags are yes/no when free-text complaint matches pattern
-# Groups chosen for clinical reasons and checked only on training set
-# \b = word boundary so that "ich" will not match in "which"
+# chief complaint flags = 1 when free-text complaint matches pattern, otherwise = 0
+# groups chosen for clinical reasons and checked only on training set only
+# patterns:
+    # \b = word boundary eg "ich" for intracranial hemorrhage will not match "which"
+    # | = "or" or other matched terms
+    # partial words will match full words eg confus means confused, confusion
 
 chief_complaint_flags = {
     "cc_ich":            r"\bich\b|head bleed|intracerebral|intraparenchymal",  # brain tissue bleed
     "cc_sdh_sah":        r"\bsdh\b|\bsah\b|subdural|subarachnoid",              # bleed around brain
     "cc_transfer":       r"transfer",                                           # from another hospital
-    "cc_impact":         r"\bmvc\b|\bmva\b|ped struck|pedestrian|\bmca\b|motorcycle|bicycl|\bbike", # accident
+    "cc_impact":         r"\bmvc\b|\bmva\b|ped struck|pedestrian|\bmca\b|motorcycle|bicycl|\bbike", # high energy accident like road crash
     "cc_altered_mental": r"altered mental|\bams\b|unresponsive|seizure|confus|letharg",
     "cc_fall":           r"fall",
 }
 
 random_state = 42 # fixed seed for identical splits every run
 
-# Continuous triage measurements: missing values will be filled and scaled
+# continuous triage measurements: missing values will be filled and scaled
 numeric = ["age", "temperature", "heartrate", "resprate", "o2sat", "sbp", "dbp", "pain_score"]
 
-# Columns describing what occurs after triage -> never used as features
+# columns describing what occurs after triage -> never used as features!
 leakage = ["hadm_id", "outtime", "disposition", "icu_intime", "hours_to_icu",
            "icu_any", "icu_24h", "first_vitals_mins"]
 
 # Features
-def build_features(cohort:pd.DataFrame) -> pd.DataFrame:
-    """Create feature matrix from triage time variables
-    
-    Encoding categories as 0 and 1 does not learn from data,
-    so can be completed before train and test split"""
 
+def build_features(cohort:pd.DataFrame) -> pd.DataFrame:
+    """Create feature matrix X from triage variables
+    
+    Encoding categories as 0/1 does not learn from data,
+    so can be completed before train/test split
+    """
+
+    # matches cohort row order
     X = pd.DataFrame(index = cohort.index)
 
-    # Continuous measurements (still containing missing values)
+    # continuous measurements (still contain missing values)
     X[numeric] = cohort[numeric]
 
-    # Binary flags
+    # binary flags
     X["male"] = (cohort["gender"] == "M").astype(int)
     X["triage_bypassed"] = cohort["triage_bypassed"].astype(int)   # whole triage form blank
     X["pain_unable"] = cohort["pain_unable"].astype(int)           # pain could not be assessed
     
-    # ESI acuity as categories and Missing acuity is informative (bypassed triage),
-    # so it is its own category
+    # ESI acuity as categories and Missing acuity is assumed to be informative
+    # ie, linked to bypassed triage so it is its own category and becomes missingness indicator
     # ESI 3-5 are combined because ESI 4-5 are too rare to estimate separately
-        
     esi = cohort["acuity"].map({1: "1", 2: "2", 3: "3plus", 4: "3plus", 5: "3plus"}).fillna("missing")
+    # get_dummies -> turns categories into own 0/1 columns
     X = X.join(pd.get_dummies(esi, prefix = "esi", dtype = int))
     
-    # Arrival mode as categories (missing treated as "unknown")
+    # arrival mode as categories eg ambulance, helicopter, walk in
+    # missing treated as "unknown"
     arrival = (cohort["arrival_transport"].fillna("UNKNOWN")
                 .str.lower().str.replace(" ", "_"))
     X = X.join(pd.get_dummies(arrival, prefix="arrival", dtype = int))
 
     # Feature set definitions
     # Feature set B - chief complaints
+
     if feature_set in ("B", "C"):
         complaint = cohort["chiefcomplaint"].fillna("").str.lower()
         for name, pattern in chief_complaint_flags.items():
             X[name] = complaint.str.contains(pattern, regex = True).astype(int)
 
     # Feature set C - vitals
-    # Researched standard clinical definitions for vital sign thresholds
-    # Missing vital gives zero, but already accounted for by "triage_bypassed"
+
+    # standard clinical thresholds for vital signs
+    # missing vital gives zero, but already accounted for by "triage_bypassed" when all missing
+    # shock_index reamins missing when either value is missing
+    # and later filled with training medianlike other continuous columns
     if feature_set == "C":
         X["shock_index"] = cohort["heartrate"] / cohort["sbp"]          # > 0.9 -> shock
-        X["hypoxia"] = (cohort["o2sat"] < 94).astype(int)               # low oxygen 
+        X["hypoxia"] = (cohort["o2sat"] < 94).astype(int)               # low oxygen saturation
         X["hypotension"] = (cohort["sbp"] < 90).astype(int)             # low blood pressure
-        X["hypertension"] = (cohort["sbp"] > 160).astype(int)           # raised BP (possible Cushing response)
+        X["hypertension"] = (cohort["sbp"] > 160).astype(int)           # raised BP (possible Cushing response where brain tries to push blood away)
         X["tachycardia"] = (cohort["heartrate"] > 100).astype(int)      # fast heart rate
         X["age_65plus"] = (cohort["age"] >= 65).astype(int)             # older patients at higher risk
     
     return X
 
 # Train/test split by patient
+
 def split_by_patient(X, y, groups, test_folds=3, n_folds=10):
-    """Return a True/False mask marking the test set (about 30% of stays).
+    """Return True/False mask marking test set (about 30% of stays)
  
-    StratifiedGroupKFold divides patients into 10 folds while keeping the ICU
+    StratifiedGroupKFold divides patients into 10 folds but keeps ICU
     rate similar in each fold; 3 folds become the test set. All stays of a
-    patient fall in the same fold, so no patient is in both sets.
+    patient fall in the same fold, so no patient is in both sets
     """
 
     sgkf = StratifiedGroupKFold(n_splits = n_folds, shuffle = True, random_state = random_state)
@@ -121,46 +140,59 @@ def split_by_patient(X, y, groups, test_folds=3, n_folds=10):
         fold[idx] = k
     return fold < test_folds
 
-# Shock index
+# Shock index - continuous columns for pre-processor
+
 def numeric_columns(X):
-    """Continuous columns present in X (shock_index will only exist for feature set C).
+    """Return continuous columns present in X
+
+    shock_index will only exist for feature set C. Columns chosen
+    from X so that the pre-processor always matches feature set
+    saved, regardless of what feature_set is set to in script
+    """
     
-    Columns chosen from data mean that the pre-processor will match faeture set that has been saved,
-    regardless of what feature_set is now set to"""
     return [c for c in numeric + ["shock_index"] if c in X.columns]
 
 # Pre-processor (fitted later on training data only)
 def make_preprocessor() -> ColumnTransformer:
-    """Fill missing numeric values with training median and standardise.
+    """Fill missing numeric values with training median and standardise
  
+    Standardising rescales column to mean 0 and standard deviation 1,
+    so features measured in varying units can be compared.
     Binary and category columns pass through unchanged. Used inside model
-    pipelines in models.py, so it is re-fitted within every cross-validation fold.
+    pipelines in models.py, so it is re-fitted within every cross-validation fold
+    but never sees data it is evaluated on.
     """
 
     numeric_steps = Pipeline([
         ("impute", SimpleImputer(strategy = "median")),
         ("scale", StandardScaler()),
     ])
+
+    # numeric_steps becomes function not list so picks up present column
     return ColumnTransformer(
         [("numeric", numeric_steps, numeric_columns)],
         remainder = "passthrough",              # keep flags and categories as is
-        verbose_feature_names_out = False,
+        verbose_feature_names_out = False,      # keep names without numeric__ prefix
     )
 
 # Run
+
 def main():
+    # reset_index to give clean row
     cohort = pd.read_pickle(cohort_path).reset_index(drop=True)
     assert cohort["stay_id"].is_unique, "duplicate ED stays in cohort"
- 
+
+    # fs_tag to record which feature set is being used for saving separately
     X = build_features(cohort)
     fs_tag = feature_set
     if drop_esi:
         X = X.drop(columns = [c for c in X.columns if c.startswith("esi_")])
         fs_tag = f"{feature_set}_noesi"
     y = cohort[outcome].astype(int)
-    groups = cohort["subject_id"]
+    groups = cohort["subject_id"] # ID keeps patient stays together
  
-    # Safety check: no post-triage information among the features
+    # safety check: stop when post-triage information is in features
+    # save them as dictionaries with features, outcomes, IDs, tags
     leaked = set(X.columns) & set(leakage)
     assert not leaked, f"leakage columns in features: {leaked}"
  
@@ -168,14 +200,17 @@ def main():
     train = {"X": X[~is_test], "y": y[~is_test], "groups": groups[~is_test], "feature_set": fs_tag}
     test = {"X": X[is_test], "y": y[is_test], "groups": groups[is_test], "feature_set": fs_tag}
     
-    # Checks: no patient in both sets, similar ICU rates
+    # checks: no patient in both sets
     overlap = set(train["groups"]) & set(test["groups"])
     assert not overlap, f"{len(overlap)} patients appear in both sets"
- 
+
+    # save both sets and create second folder if not existing
     out_dir.mkdir(parents=True, exist_ok=True)
     pd.to_pickle(train, out_dir / "train.pkl")
     pd.to_pickle(test, out_dir / "test.pkl")
- 
+
+    # summary with feature list, size, ICU rate, bypassed triage rate
+    # when balanced, the train and test rates should be similar!
     print(f"Features ({X.shape[1]}): {list(X.columns)}\n")
     print(f"{'':<8}{'stays':>7}{'patients':>10}{'ICU rate':>10}{'bypassed':>10}")
     for name, part in [("train", train), ("test", test)]:
@@ -184,6 +219,8 @@ def main():
     print("\nPatients in both sets:", len(overlap))
     print("Saved to", out_dir)
 
+    # for secondary feature sets: number of training stays for each flag and ICU rate
+    # training data only
     if feature_set in ("B", "C"):
         Xtr, ytr = train["X"], train["y"]
         flags = list(chief_complaint_flags)
