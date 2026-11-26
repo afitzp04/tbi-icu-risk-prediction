@@ -6,8 +6,9 @@ Outputs: data/processed/train.pkl    (features, outcome, and patients IDs for tr
 
 Design notes:
 - only information available at ED triage is used as feature
-- steps that learn from data (filling missing values, scaling) not applied
-- steps defined by make_preprocessor() and fitted later on training data only, inside cross validation -> no information leaks from test set
+- steps that learn from data (eg filling missing values or scaling) not applied here
+- they are defined in make_preprocessor() and fitted later on training data only
+- prevents leakage
 - train/test split by patient so no patient appears in both sets
 """
 
@@ -46,8 +47,8 @@ drop_esi = False
 # groups chosen for clinical reasons and checked only on training set
 # patterns:
     # \b = word boundary eg "ich" for intracranial hemorrhage will not match "which"
-    # | = "or" or other matched terms
-    # partial words will match full words eg confus means confused, confusion
+    # | = "or" -> matches listed terms
+    # partial words will match longer words containing it eg confus means confused, confusion
 
 chief_complaint_flags = {
     "cc_ich":            r"\bich\b|head bleed|intracerebral|intraparenchymal",  # brain tissue bleed
@@ -111,14 +112,14 @@ def build_features(cohort:pd.DataFrame) -> pd.DataFrame:
     # Feature set C - vitals
 
     # standard clinical thresholds for vital signs
-    # missing vital gives zero, but already accounted for by "triage_bypassed" when all missing
+    # missing vital gives zero in yes/no flags, but fully missing vitals are already accounted for by "triage_bypassed"
     # shock_index remains missing when either value is missing
     # and later filled with training median like other continuous columns
     if feature_set == "C":
         X["shock_index"] = cohort["heartrate"] / cohort["sbp"]          # > 0.9 -> shock
         X["hypoxia"] = (cohort["o2sat"] < 94).astype(int)               # low oxygen saturation
         X["hypotension"] = (cohort["sbp"] < 90).astype(int)             # low blood pressure
-        X["hypertension"] = (cohort["sbp"] > 160).astype(int)           # raised BP (possible Cushing response where BP rises to keep blood from brain)
+        X["hypertension"] = (cohort["sbp"] > 160).astype(int)           # raised BP (possible Cushing response where BP rises to keep blood flowing to brain)
         X["tachycardia"] = (cohort["heartrate"] > 100).astype(int)      # fast heart rate
         X["age_65plus"] = (cohort["age"] >= 65).astype(int)             # older patients at higher risk
     
@@ -142,7 +143,7 @@ def split_by_patient(X, y, groups, test_folds=3, n_folds=10):
         k = k + 1
     return fold < test_folds
 
-# Shock index - continuous columns for pre-processor
+# Continuous columns for pre-processor
 
 def numeric_columns(X):
     """Return continuous columns present in X
@@ -174,7 +175,8 @@ def make_preprocessor() -> ColumnTransformer:
         ("scale", StandardScaler()),
     ])
 
-    # numeric_columns becomes function not list so picks up present column
+    # numeric_columns passed as function (not list)
+    # so continuous columns in X are picked up when it is fitted
     return ColumnTransformer(
         [("numeric", numeric_steps, numeric_columns)],
         remainder = "passthrough",              # keep flags and categories as is
@@ -184,7 +186,8 @@ def make_preprocessor() -> ColumnTransformer:
 # Run
 
 def main():
-    # reset_index to give clean row
+    # reset_index to give clean row numbers 0, 1, 2...
+    # eval.py will use them to match row back to cohort
     cohort = pd.read_pickle(cohort_path).reset_index(drop=True)
     assert cohort["stay_id"].is_unique, "duplicate ED stays in cohort"
 
